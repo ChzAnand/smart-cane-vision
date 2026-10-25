@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Cane - Vision</title>
+<style>
+  :root { --bg:#0b1020; --card:#151c33; --text:#f2f5ff; --muted:#9aa6c8; --accent:#ffd23f; --good:#37d67a; --bad:#ff5d5d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.4rem; margin: 6px 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 14px; font-size: .95rem; }
+  .card { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .stage { position: relative; width: 100%; background:#000; border-radius: 12px; overflow: hidden; min-height: 180px; }
+  video, canvas.overlay { width: 100%; display: block; }
+  canvas.overlay { position: absolute; left: 0; top: 0; height: 100%; pointer-events: none; }
+  canvas#photoCanvas { width: 100%; border-radius: 12px; display: none; margin-top: 10px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  button, label.btn { font-size: 1.05rem; padding: 13px 16px; border-radius: 12px; border: 0; background: var(--accent); color: #111; font-weight: 700; flex: 1 1 130px; text-align: center; cursor: pointer; }
+  button.secondary, label.btn { background: #2a3558; color: var(--text); }
+  button:disabled { opacity: .45; }
+  input[type=text] { width: 100%; font-size: 1rem; padding: 12px; border-radius: 10px; border: 1px solid #2a3558; background: #0b1020; color: var(--text); margin-top: 6px; }
+  .label { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; margin-top: 10px; }
+  .status { color: var(--muted); min-height: 1.4em; margin: 8px 0 0; }
+  .fps { color: var(--accent); font-weight: 700; }
+  ul.dets { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.dets li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #222b4a; }
+  ul.dets .name { flex: 1 1 auto; font-weight: 700; }
+  ul.dets .meta { color: var(--muted); font-size: .85rem; }
+  .bar { width: 80px; height: 10px; background: #222b4a; border-radius: 6px; overflow: hidden; flex: 0 0 80px; }
+  .bar > i { display: block; height: 100%; background: var(--good); }
+  .chk { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 1rem; }
+  .chk input { width: 22px; height: 22px; }
+  details summary { cursor: pointer; font-weight: 700; }
+  small { color: var(--muted); }
+  .cane { font-size: 1.15rem; font-weight: 700; margin-top: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Smart Cane - Vision</h1>
+  <p class="sub">Live object detection on the phone camera. Camera pictures stay on this phone. Only object names, scores and (if you switch it on) your location are shared with the caretaker.</p>
+
+  <div class="card">
+    <div class="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="overlay" class="overlay"></canvas>
+    </div>
+    <canvas id="photoCanvas"></canvas>
+    <div class="row">
+      <button id="startBtn">Start camera</button>
+      <button id="stopBtn" class="secondary" disabled>Stop</button>
+    </div>
+    <div class="row">
+      <label class="btn" for="photoInput">Pick a photo</label>
+      <input id="photoInput" type="file" accept="image/*" capture="environment" style="display:none">
+    </div>
+    <p id="status" class="status">Press Start camera. The first start downloads the AI model (needs internet).</p>
+    <p class="status">Speed: <span id="fps" class="fps">0</span> frames per second</p>
+  </div>
+
+  <div class="card">
+    <div class="label">Detected now (name, confidence, where, how big)</div>
+    <ul id="dets" class="dets"><li><span class="meta">Nothing yet</span></li></ul>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 4px">Share with the caretaker</h2>
+    <small>Create a free Firebase Realtime Database, paste its address here, and use the same pairing code on the cane.</small>
+    <div class="label">Database address</div>
+    <input id="db" type="text" inputmode="url" placeholder="your-project-default-rtdb.firebaseio.com" autocapitalize="off" autocorrect="off">
+    <div class="label">Pairing code</div>
+    <input id="code" type="text" placeholder="cane-xxxxxxxx" autocapitalize="off" autocorrect="off">
+    <label class="chk"><input id="shareDet" type="checkbox" checked> Send what the camera sees</label>
+    <label class="chk"><input id="shareLoc" type="checkbox"> Share my location</label>
+    <div class="row">
+      <button id="genBtn" class="secondary">New code</button>
+      <button id="saveBtn">Save and test</button>
+    </div>
+    <div class="row">
+      <button id="linkBtn" class="secondary">Copy caretaker link</button>
+    </div>
+    <p id="shareStatus" class="status">Not set up yet.</p>
+  </div>
+
+  <div class="card">
+    <div class="label">Cane</div>
+    <div id="cane" class="cane">Not connected</div>
+    <small>Updates about every 3 seconds when the cane is on and has WiFi.</small>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Diagnostics (send me this if something fails)</summary>
+      <pre id="diag" style="white-space:pre-wrap;font-size:.85rem;color:#9aa6c8;margin:10px 0 0"></pre>
+    </details>
+  </div>
+
+  <p><small>The detector knows 80 everyday object types (person, chair, bottle, car, dog, and so on). It cannot see stairs, potholes or glass doors, so it supports the cane and does not replace it.</small></p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script>
+// ---- Shared helpers: used by the phone page and the caretaker page ----
+
+function normalizeDb(url) {
+  var u = String(url || "").trim();
+  if (!u) return "";
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  try { return new URL(u).origin; } catch (e) { return u.replace(/\/+$/, ""); }
+}
+
+function cleanCode(code) {
+  return String(code || "").trim().replace(/[^A-Za-z0-9_-]/g, "");
+}
+
+// Build a Firebase REST address: https://DB/root/CODE/leaf.json?query
+function pathUrl(db, root, code, leaf, query) {
+  return normalizeDb(db) + "/" + root + "/" + cleanCode(code) + (leaf ? "/" + leaf : "") + ".json" + (query ? "?" + query : "");
+}
+
+// Where in the camera frame is the object?
+function positionWord(cx, width) {
+  var r = cx / width;
+  if (r < 0.33) return "left";
+  if (r > 0.67) return "right";
+  return "ahead";
+}
+
+// Bigger box = closer.
+function sizeWord(boxH, frameH) {
+  var r = boxH / frameH;
+  if (r > 0.6) return "very close";
+  if (r > 0.35) return "close";
+  return "far";
+}
+
+// Turn the model's output into a clean list, biggest object first.
+function detectionsFor(preds, frameW, frameH, minScore) {
+  var out = [];
+  for (var i = 0; i < preds.length; i++) {
+    var p = preds[i];
+    if (p.score < minScore) continue;
+    var b = p.bbox; // [x, y, width, height]
+    out.push({
+      label: p.class,
+      conf: Math.round(p.score * 100),
+      pos: positionWord(b[0] + b[2] / 2, frameW),
+      size: sizeWord(b[3], frameH),
+      area: b[2] * b[3]
+    });
+  }
+  out.sort(function (a, b) { return b.area - a.area; });
+  return out;
+}
+
+function detectionText(d) {
+  return d.label + " " + d.conf + "% - " + d.pos + " - " + d.size;
+}
+
+// What the phone sends to the caretaker. No camera pictures, only names and scores.
+function visionPayload(dets, fps, maxN) {
+  return {
+    objects: dets.slice(0, maxN).map(function (d) { return { label: d.label, conf: d.conf, pos: d.pos, size: d.size }; }),
+    fps: Math.round(fps * 10) / 10,
+    t: { ".sv": "timestamp" }
+  };
+}
+
+// One alert event when an object is very close (at most once per label every gapMs).
+function closeEvent(dets, memo, nowMs, gapMs) {
+  for (var i = 0; i < dets.length; i++) {
+    var d = dets[i];
+    if (d.size === "very close" && (!memo[d.label] || nowMs - memo[d.label] > gapMs)) {
+      memo[d.label] = nowMs;
+      return { type: "object_close", text: d.label + " very close, " + d.pos, t: { ".sv": "timestamp" } };
+    }
+  }
+  return null;
+}
+
+// Is the cane still reporting? ESP32 writes about every 3 s.
+function statusFrom(state, nowMs) {
+  if (!state || typeof state.t !== "number") return { kind: "none", ageS: null };
+  var ageS = Math.max(0, Math.round((nowMs - state.t) / 1000));
+  if (ageS <= 15) return { kind: "online", ageS: ageS };
+  if (ageS <= 60) return { kind: "stale", ageS: ageS };
+  return { kind: "offline", ageS: ageS };
+}
+
+// severity 0 = nothing reported, 1 = caution, 2 = danger
+function alertFrom(state) {
+  if (!state) return { severity: 0, text: "No cane data yet" };
+  var dist = typeof state.dist === "number" ? state.dist : null;
+  var where = dist !== null ? " (" + Math.round(dist) + " cm)" : "";
+  if (Number(state.wet) === 1) return { severity: 2, text: "Wet ground detected" };
+  if (Number(state.level) >= 4) return { severity: 2, text: "Obstacle very close" + where };
+  if (Number(state.level) === 3) return { severity: 1, text: "Obstacle close" + where };
+  return { severity: 0, text: "No hazard reported" };
+}
+
+function asList(x) {
+  if (!x) return [];
+  if (Array.isArray(x)) return x.filter(function (v) { return v; });
+  return Object.keys(x).sort().map(function (k) { return x[k]; });
+}
+
+function ageText(tMs, nowMs) {
+  if (typeof tMs !== "number") return "no data";
+  var s = Math.max(0, Math.round((nowMs - tMs) / 1000));
+  if (s < 60) return s + " s ago";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  return Math.round(s / 3600) + " h ago";
+}
+
+function randomCode() {
+  var chars = "abcdefghjkmnpqrstuvwxyz23456789";
+  var s = "cane-";
+  var arr = new Uint32Array(8);
+  (typeof crypto !== "undefined" && crypto.getRandomValues) ? crypto.getRandomValues(arr) : arr.forEach(function (_, i) { arr[i] = Math.floor(Math.random() * 4294967296); });
+  for (var i = 0; i < 8; i++) s += chars[arr[i] % chars.length];
+  return s;
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { normalizeDb, cleanCode, pathUrl, positionWord, sizeWord, detectionsFor, detectionText, visionPayload, closeEvent, statusFrom, alertFrom, asList, ageText, randomCode };
+}
+
+</script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var MIN_SCORE = 0.5;
+  var video = $("video"), overlay = $("overlay"), photoCanvas = $("photoCanvas");
+  var startBtn = $("startBtn"), stopBtn = $("stopBtn"), photoInput = $("photoInput");
+  var statusEl = $("status"), fpsEl = $("fps"), detsEl = $("dets");
+  var dbEl = $("db"), codeEl = $("code"), shareDetEl = $("shareDet"), shareLocEl = $("shareLoc");
+  var shareStatusEl = $("shareStatus"), caneEl = $("cane");
+
+  var model = null, stream = null, running = false;
+  var latestDets = [], fpsNow = 0, frameTimes = [], frames = 0;
+  var lastVisionSent = 0, lastLocSent = 0, lastCanePoll = 0, lastError = "none";
+  var closeMemo = {}, lastPos = null, watchId = null;
+
+  function setStatus(t) { statusEl.textContent = t; }
+  function cfgOk() { return normalizeDb(dbEl.value) !== "" && cleanCode(codeEl.value) !== ""; }
+
+  /* ---------- cloud ---------- */
+  async function cloud(method, root, leaf, body, query) {
+    var url = pathUrl(dbEl.value, root, codeEl.value, leaf, query);
+    var opt = { method: method, cache: "no-store" };
+    if (body !== undefined) { opt.body = JSON.stringify(body); opt.headers = { "Content-Type": "application/json" }; }
+    var r = await fetch(url, opt);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r;
+  }
+  function shareOk(text) { shareStatusEl.textContent = text; }
+  function shareFail(e) { lastError = "cloud: " + (e && e.message ? e.message : e); shareStatusEl.textContent = "Could not reach the database (" + (e && e.message ? e.message : e) + "). Check the address, the code and the rules."; }
+
+  async function sendVision() {
+    lastVisionSent = Date.now();
+    try {
+      await cloud("PUT", "cane", "vision", visionPayload(latestDets, fpsNow, 6), "print=silent");
+      shareOk("Sharing detections. Last upload just now.");
+    } catch (e) { shareFail(e); }
+  }
+  async function sendEvent(ev) {
+    try { await cloud("POST", "events", "", ev, "print=silent"); } catch (e) { shareFail(e); }
+  }
+  async function sendLoc() {
+    lastLocSent = Date.now();
+    var c = lastPos.coords;
+    try {
+      await cloud("PUT", "cane", "loc", { lat: c.latitude, lng: c.longitude, acc: Math.round(c.accuracy || 0), t: { ".sv": "timestamp" } }, "print=silent");
+    } catch (e) { shareFail(e); }
+  }
+  async function pollCane() {
+    lastCanePoll = Date.now();
+    try {
+      var r = await cloud("GET", "cane", "state", undefined, "");
+      var s = await r.json();
+      var st = statusFrom(s, Date.now());
+      if (st.kind === "none") { caneEl.textContent = "No data from the cane yet"; return; }
+      var dist = typeof s.dist === "number" ? Math.round(s.dist) + " cm" : "no echo";
+      caneEl.textContent = dist + " | alert " + (s.level || 0) + "/4 | " + (Number(s.wet) === 1 ? "WET" : "dry") + " | " + (st.kind === "online" ? "online" : "last seen " + st.ageS + " s ago");
+    } catch (e) { caneEl.textContent = "Could not read the cane data"; lastError = "cane: " + (e && e.message ? e.message : e); }
+  }
+
+  /* ---------- location (only if the user ticks the box) ---------- */
+  function syncLocation() {
+    if (shareLocEl.checked && watchId === null && navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(function (p) { lastPos = p; }, function (e) { lastError = "location: " + e.message; shareOk("Location error: " + e.message); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+    }
+    if (!shareLocEl.checked && watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; lastPos = null; }
+  }
+
+  /* ---------- AI detection ---------- */
+  async function ensureModel() {
+    if (model) return model;
+    setStatus("Loading the AI model (needs internet, first time about 10 seconds)...");
+    model = await cocoSsd.load();
+    setStatus("AI model ready.");
+    return model;
+  }
+
+  function drawBoxes(preds, w, h) {
+    overlay.width = w; overlay.height = h;
+    var ctx = overlay.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    ctx.lineWidth = Math.max(3, w / 160);
+    ctx.font = Math.max(16, Math.round(w / 24)) + "px sans-serif";
+    preds.forEach(function (p) {
+      if (p.score < MIN_SCORE) return;
+      var b = p.bbox;
+      ctx.strokeStyle = "#ffd23f"; ctx.fillStyle = "#ffd23f";
+      ctx.strokeRect(b[0], b[1], b[2], b[3]);
+      ctx.fillText(p.class + " " + Math.round(p.score * 100) + "%", b[0] + 4, Math.max(18, b[1] - 6));
+    });
+  }
+
+  function showDetections(dets) {
+    detsEl.textContent = "";
+    if (!dets.length) {
+      var li0 = document.createElement("li");
+      var sp = document.createElement("span"); sp.className = "meta"; sp.textContent = "Nothing recognised";
+      li0.appendChild(sp); detsEl.appendChild(li0); return;
+    }
+    dets.slice(0, 8).forEach(function (d) {
+      var li = document.createElement("li");
+      var name = document.createElement("span"); name.className = "name"; name.textContent = d.label + " " + d.conf + "%";
+      var meta = document.createElement("span"); meta.className = "meta"; meta.textContent = d.pos + " - " + d.size;
+      var bar = document.createElement("span"); bar.className = "bar";
+      var fill = document.createElement("i"); fill.style.width = Math.max(0, Math.min(100, d.conf)) + "%";
+      bar.appendChild(fill);
+      li.appendChild(name); li.appendChild(meta); li.appendChild(bar);
+      detsEl.appendChild(li);
+    });
+  }
+
+  function trackFps() {
+    var now = Date.now();
+    frameTimes.push(now);
+    if (frameTimes.length > 12) frameTimes.shift();
+    if (frameTimes.length > 1) fpsNow = (frameTimes.length - 1) * 1000 / (now - frameTimes[0]);
+    fpsEl.textContent = fpsNow.toFixed(1);
+  }
+
+  async function detectLoop() {
+    if (!running) return;
+    try {
+      if (video.readyState >= 2 && video.videoWidth > 0) {
+        var w = video.videoWidth, h = video.videoHeight;
+        var preds = await model.detect(video, 10, MIN_SCORE);
+        frames++;
+        trackFps();
+        drawBoxes(preds, w, h);
+        latestDets = detectionsFor(preds, w, h, MIN_SCORE);
+        showDetections(latestDets);
+        if (cfgOk() && shareDetEl.checked) {
+          var ev = closeEvent(latestDets, closeMemo, Date.now(), 15000);
+          if (ev) sendEvent(ev);
+        }
+      }
+    } catch (e) { lastError = "detect: " + (e && e.message ? e.message : e); setStatus("Detection error: " + lastError); }
+    setTimeout(detectLoop, 30);
+  }
+
+  async function startCamera() {
+    startBtn.disabled = true;
+    try {
+      await ensureModel();
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setStatus("This browser has no camera access here. Use Pick a photo, or open the page over https.");
+        startBtn.disabled = false; return;
+      }
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+      running = true;
+      stopBtn.disabled = false;
+      photoCanvas.style.display = "none";
+      setStatus("Looking... point the camera ahead.");
+      detectLoop();
+    } catch (e) {
+      lastError = "camera/model: " + (e && e.message ? e.message : e);
+      setStatus("Could not start the camera: " + (e && e.message ? e.message : e) + ". Allow camera access, or use Pick a photo.");
+      startBtn.disabled = false;
+    }
+  }
+
+  function stopCamera() {
+    running = false;
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    video.srcObject = null;
+    startBtn.disabled = false; stopBtn.disabled = true;
+    latestDets = []; showDetections(latestDets);
+    setStatus("Stopped.");
+  }
+
+  photoInput.addEventListener("change", async function () {
+    var f = photoInput.files && photoInput.files[0];
+    if (!f) return;
+    try {
+      await ensureModel();
+      var img = new Image();
+      img.onload = async function () {
+        photoCanvas.width = img.naturalWidth; photoCanvas.height = img.naturalHeight;
+        photoCanvas.style.display = "block";
+        var ctx = photoCanvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        var preds = await model.detect(img, 10, MIN_SCORE);
+        ctx.lineWidth = Math.max(3, img.naturalWidth / 160);
+        ctx.font = Math.max(16, Math.round(img.naturalWidth / 24)) + "px sans-serif";
+        preds.forEach(function (p) {
+          if (p.score < MIN_SCORE) return;
+          ctx.strokeStyle = "#ffd23f"; ctx.fillStyle = "#ffd23f";
+          ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]);
+          ctx.fillText(p.class + " " + Math.round(p.score * 100) + "%", p.bbox[0] + 4, Math.max(18, p.bbox[1] - 6));
+        });
+        showDetections(detectionsFor(preds, img.naturalWidth, img.naturalHeight, MIN_SCORE));
+        setStatus("Photo checked.");
+      };
+      img.src = URL.createObjectURL(f);
+    } catch (e) { setStatus("Could not check the photo: " + (e && e.message ? e.message : e)); }
+  });
+
+  /* ---------- settings ---------- */
+  function saveSettings() {
+    try {
+      localStorage.setItem("cane_db", dbEl.value.trim());
+      localStorage.setItem("cane_code", codeEl.value.trim());
+      localStorage.setItem("cane_shareDet", shareDetEl.checked ? "1" : "0");
+      localStorage.setItem("cane_shareLoc", shareLocEl.checked ? "1" : "0");
+    } catch (e) {}
+  }
+  function loadSettings() {
+    try {
+      dbEl.value = localStorage.getItem("cane_db") || "";
+      codeEl.value = localStorage.getItem("cane_code") || "";
+      shareDetEl.checked = localStorage.getItem("cane_shareDet") !== "0";
+      shareLocEl.checked = localStorage.getItem("cane_shareLoc") === "1";
+    } catch (e) {}
+  }
+
+  $("genBtn").addEventListener("click", function () { codeEl.value = randomCode(); saveSettings(); shareOk("New code made. Put the same code in the cane sketch."); });
+  $("saveBtn").addEventListener("click", async function () {
+    saveSettings(); syncLocation();
+    if (!cfgOk()) { shareOk("Enter the database address and a pairing code first."); return; }
+    try { await cloud("GET", "cane", "", undefined, "shallow=true"); shareOk("Connected to the database. Settings saved."); lastCanePoll = 0; }
+    catch (e) { shareFail(e); }
+  });
+  $("linkBtn").addEventListener("click", async function () {
+    if (!cfgOk()) { shareOk("Save the database address and code first."); return; }
+    var link = new URL("caretaker.html", location.href).href + "#db=" + encodeURIComponent(normalizeDb(dbEl.value)) + "&code=" + encodeURIComponent(cleanCode(codeEl.value));
+    try { await navigator.clipboard.writeText(link); shareOk("Caretaker link copied. Send it to the caretaker."); }
+    catch (e) { shareOk("Copy this link: " + link); }
+  });
+  shareDetEl.addEventListener("change", saveSettings);
+  shareLocEl.addEventListener("change", function () { saveSettings(); syncLocation(); });
+  startBtn.addEventListener("click", startCamera);
+  stopBtn.addEventListener("click", stopCamera);
+  window.addEventListener("error", function (ev) { lastError = "page: " + ev.message; });
+
+  /* ---------- clock + diagnostics ---------- */
+  function updateDiag() {
+    var lines = [
+      "address: " + location.protocol + "//" + (location.host || "(local file)"),
+      "secure page (camera needs this): " + (window.isSecureContext ? "yes" : "NO"),
+      "camera API: " + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? "yes" : "NO"),
+      "AI libraries: tf " + (typeof tf !== "undefined" ? "loaded" : "NOT LOADED") + ", cocoSsd " + (typeof cocoSsd !== "undefined" ? "loaded" : "NOT LOADED"),
+      "AI model: " + (model ? "loaded" : "not loaded yet"),
+      "camera: " + (running ? "running " + video.videoWidth + "x" + video.videoHeight : "off"),
+      "frames analysed: " + frames + " (" + fpsNow.toFixed(1) + " per second)",
+      "database set: " + (cfgOk() ? "yes" : "no") + ", sharing detections: " + (shareDetEl.checked ? "on" : "off") + ", location: " + (shareLocEl.checked ? "on" : "off"),
+      "last error: " + lastError
+    ];
+    $("diag").textContent = lines.join("\n");
+  }
+  function tick() {
+    var now = Date.now();
+    if (cfgOk()) {
+      if (running && shareDetEl.checked && now - lastVisionSent >= 2000) sendVision();
+      if (shareLocEl.checked && lastPos && now - lastLocSent >= 10000) sendLoc();
+      if (now - lastCanePoll >= 2000) pollCane();
+    }
+    updateDiag();
+  }
+  loadSettings();
+  syncLocation();
+  if (cfgOk()) shareOk("Settings loaded. Press Save and test to check the connection.");
+  setInterval(tick, 1000);
+  tick();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Cane - Caretaker</title>
+<style>
+  :root { --bg:#0b1020; --card:#151c33; --text:#f2f5ff; --muted:#9aa6c8; --accent:#ffd23f; --good:#37d67a; --warn:#ffb020; --bad:#ff5d5d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.4rem; margin: 6px 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 14px; font-size: .95rem; }
+  .card { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .label { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+  .banner { border-radius: 14px; padding: 14px; margin-bottom: 14px; font-size: 1.25rem; font-weight: 800; }
+  .banner small { display: block; font-weight: 500; font-size: .9rem; margin-top: 2px; opacity: .9; }
+  .online { background: #123d28; color: #9bf0c0; } .stale { background: #4a3a10; color: #ffd98a; }
+  .offline { background: #4a1818; color: #ffb3b3; } .none { background: #26304f; color: var(--muted); }
+  .sev0 { background: #123d28; color: #9bf0c0; } .sev1 { background: #4a3a10; color: #ffd98a; } .sev2 { background: #5a1a1a; color: #ffc2c2; }
+  .big { font-size: 2.4rem; font-weight: 800; line-height: 1.1; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+  .meter { height: 12px; background: #222b4a; border-radius: 8px; overflow: hidden; margin-top: 8px; }
+  .meter > i { display: block; height: 100%; background: var(--good); }
+  ul { list-style: none; padding: 0; margin: 8px 0 0; }
+  li { padding: 8px 0; border-bottom: 1px solid #222b4a; display: flex; gap: 10px; align-items: center; }
+  li .name { flex: 1 1 auto; font-weight: 700; } li .meta { color: var(--muted); font-size: .85rem; }
+  .bar { width: 80px; height: 10px; background: #222b4a; border-radius: 6px; overflow: hidden; flex: 0 0 80px; }
+  .bar > i { display: block; height: 100%; background: var(--good); }
+  .ev-time { color: var(--muted); font-size: .85rem; flex: 0 0 74px; }
+  .ev-wet { color: #ffc2c2; } .ev-close { color: #ffd98a; }
+  input[type=text] { width: 100%; font-size: 1rem; padding: 12px; border-radius: 10px; border: 1px solid #2a3558; background: #0b1020; color: var(--text); margin-top: 6px; }
+  button { font-size: 1.05rem; padding: 13px 16px; border-radius: 12px; border: 0; background: var(--accent); color: #111; font-weight: 700; margin-top: 10px; width: 100%; cursor: pointer; }
+  iframe { width: 100%; height: 240px; border: 0; border-radius: 12px; margin-top: 10px; }
+  a { color: var(--accent); }
+  small { color: var(--muted); }
+  .err { color: var(--bad); min-height: 1.3em; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Smart Cane - Caretaker</h1>
+  <p class="sub">Live view of the cane and the phone camera. This page only reads the data. It refreshes every 2 seconds.</p>
+
+  <div id="setup" class="card">
+    <details id="setupBox" open>
+      <summary style="cursor:pointer;font-weight:700">Connection</summary>
+      <div class="label" style="margin-top:10px">Database address</div>
+      <input id="db" type="text" inputmode="url" placeholder="your-project-default-rtdb.firebaseio.com" autocapitalize="off" autocorrect="off">
+      <div class="label" style="margin-top:10px">Pairing code</div>
+      <input id="code" type="text" placeholder="cane-xxxxxxxx" autocapitalize="off" autocorrect="off">
+      <button id="connectBtn">Connect</button>
+      <p id="err" class="err"></p>
+    </details>
+  </div>
+
+  <div id="conn" class="banner none">Not connected<small>Enter the database address and pairing code.</small></div>
+  <div id="alert" class="banner sev0">No cane data yet</div>
+
+  <div class="card">
+    <div class="label">Cane sensors</div>
+    <div class="grid">
+      <div><div class="label">Distance ahead</div><div id="dist" class="big">-</div></div>
+      <div><div class="label">Ground</div><div id="wet" class="big">-</div></div>
+    </div>
+    <div class="label" style="margin-top:12px">Alert level (0 quiet, 4 obstacle very close)</div>
+    <div class="meter"><i id="levelBar" style="width:0%"></i></div>
+    <small id="caneAge"></small>
+  </div>
+
+  <div class="card">
+    <div class="label">What the phone camera sees</div>
+    <ul id="objs"><li><span class="meta">No data</span></li></ul>
+    <small id="visAge"></small>
+  </div>
+
+  <div class="card">
+    <div class="label">User location</div>
+    <div id="locText" style="margin-top:6px">Not shared</div>
+    <iframe id="map" title="Map" hidden></iframe>
+    <div id="locLinks" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Recent alerts</div>
+    <ul id="events"><li><span class="meta">No alerts yet</span></li></ul>
+  </div>
+</main>
+
+<script>
+// ---- Shared helpers: used by the phone page and the caretaker page ----
+
+function normalizeDb(url) {
+  var u = String(url || "").trim();
+  if (!u) return "";
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  try { return new URL(u).origin; } catch (e) { return u.replace(/\/+$/, ""); }
+}
+
+function cleanCode(code) {
+  return String(code || "").trim().replace(/[^A-Za-z0-9_-]/g, "");
+}
+
+// Build a Firebase REST address: https://DB/root/CODE/leaf.json?query
+function pathUrl(db, root, code, leaf, query) {
+  return normalizeDb(db) + "/" + root + "/" + cleanCode(code) + (leaf ? "/" + leaf : "") + ".json" + (query ? "?" + query : "");
+}
+
+// Where in the camera frame is the object?
+function positionWord(cx, width) {
+  var r = cx / width;
+  if (r < 0.33) return "left";
+  if (r > 0.67) return "right";
+  return "ahead";
+}
+
+// Bigger box = closer.
+function sizeWord(boxH, frameH) {
+  var r = boxH / frameH;
+  if (r > 0.6) return "very close";
+  if (r > 0.35) return "close";
+  return "far";
+}
+
+// Turn the model's output into a clean list, biggest object first.
+function detectionsFor(preds, frameW, frameH, minScore) {
+  var out = [];
+  for (var i = 0; i < preds.length; i++) {
+    var p = preds[i];
+    if (p.score < minScore) continue;
+    var b = p.bbox; // [x, y, width, height]
+    out.push({
+      label: p.class,
+      conf: Math.round(p.score * 100),
+      pos: positionWord(b[0] + b[2] / 2, frameW),
+      size: sizeWord(b[3], frameH),
+      area: b[2] * b[3]
+    });
+  }
+  out.sort(function (a, b) { return b.area - a.area; });
+  return out;
+}
+
+function detectionText(d) {
+  return d.label + " " + d.conf + "% - " + d.pos + " - " + d.size;
+}
+
+// What the phone sends to the caretaker. No camera pictures, only names and scores.
+function visionPayload(dets, fps, maxN) {
+  return {
+    objects: dets.slice(0, maxN).map(function (d) { return { label: d.label, conf: d.conf, pos: d.pos, size: d.size }; }),
+    fps: Math.round(fps * 10) / 10,
+    t: { ".sv": "timestamp" }
+  };
+}
+
+// One alert event when an object is very close (at most once per label every gapMs).
+function closeEvent(dets, memo, nowMs, gapMs) {
+  for (var i = 0; i < dets.length; i++) {
+    var d = dets[i];
+    if (d.size === "very close" && (!memo[d.label] || nowMs - memo[d.label] > gapMs)) {
+      memo[d.label] = nowMs;
+      return { type: "object_close", text: d.label + " very close, " + d.pos, t: { ".sv": "timestamp" } };
+    }
+  }
+  return null;
+}
+
+// Is the cane still reporting? ESP32 writes about every 3 s.
+function statusFrom(state, nowMs) {
+  if (!state || typeof state.t !== "number") return { kind: "none", ageS: null };
+  var ageS = Math.max(0, Math.round((nowMs - state.t) / 1000));
+  if (ageS <= 15) return { kind: "online", ageS: ageS };
+  if (ageS <= 60) return { kind: "stale", ageS: ageS };
+  return { kind: "offline", ageS: ageS };
+}
+
+// severity 0 = nothing reported, 1 = caution, 2 = danger
+function alertFrom(state) {
+  if (!state) return { severity: 0, text: "No cane data yet" };
+  var dist = typeof state.dist === "number" ? state.dist : null;
+  var where = dist !== null ? " (" + Math.round(dist) + " cm)" : "";
+  if (Number(state.wet) === 1) return { severity: 2, text: "Wet ground detected" };
+  if (Number(state.level) >= 4) return { severity: 2, text: "Obstacle very close" + where };
+  if (Number(state.level) === 3) return { severity: 1, text: "Obstacle close" + where };
+  return { severity: 0, text: "No hazard reported" };
+}
+
+function asList(x) {
+  if (!x) return [];
+  if (Array.isArray(x)) return x.filter(function (v) { return v; });
+  return Object.keys(x).sort().map(function (k) { return x[k]; });
+}
+
+function ageText(tMs, nowMs) {
+  if (typeof tMs !== "number") return "no data";
+  var s = Math.max(0, Math.round((nowMs - tMs) / 1000));
+  if (s < 60) return s + " s ago";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  return Math.round(s / 3600) + " h ago";
+}
+
+function randomCode() {
+  var chars = "abcdefghjkmnpqrstuvwxyz23456789";
+  var s = "cane-";
+  var arr = new Uint32Array(8);
+  (typeof crypto !== "undefined" && crypto.getRandomValues) ? crypto.getRandomValues(arr) : arr.forEach(function (_, i) { arr[i] = Math.floor(Math.random() * 4294967296); });
+  for (var i = 0; i < 8; i++) s += chars[arr[i] % chars.length];
+  return s;
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { normalizeDb, cleanCode, pathUrl, positionWord, sizeWord, detectionsFor, detectionText, visionPayload, closeEvent, statusFrom, alertFrom, asList, ageText, randomCode };
+}
+
+</script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var dbEl = $("db"), codeEl = $("code"), errEl = $("err");
+  var timer = null, mapKey = "";
+
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function setBanner(node, cls, title, sub) {
+    node.className = "banner " + cls;
+    node.textContent = title;
+    if (sub) { var s = el("small", "", sub); node.appendChild(s); }
+  }
+
+  function render(cane, events) {
+    var now = Date.now();
+    cane = cane || {};
+    var st = statusFrom(cane.state, now);
+    var titles = { online: "Cane ONLINE", stale: "Cane connection slow", offline: "Cane OFFLINE", none: "No data from the cane yet" };
+    setBanner($("conn"), st.kind, titles[st.kind], st.ageS === null ? "Waiting for the first reading." : "Last reading " + st.ageS + " s ago");
+
+    var al = (st.kind === "online" || st.kind === "stale") ? alertFrom(cane.state) : { severity: 0, text: st.kind === "none" ? "No cane data yet" : "Cane not reporting, so hazards cannot be shown" };
+    setBanner($("alert"), "sev" + al.severity, al.text);
+    document.title = (al.severity === 2 ? "DANGER - " : al.severity === 1 ? "Caution - " : st.kind === "offline" ? "Offline - " : "") + "Smart Cane - Caretaker";
+
+    var s = cane.state || {};
+    $("dist").textContent = typeof s.dist === "number" ? Math.round(s.dist) + " cm" : (cane.state ? "no echo" : "-");
+    $("wet").textContent = cane.state ? (Number(s.wet) === 1 ? "WET" : "dry") : "-";
+    var lvl = Math.max(0, Math.min(4, Number(s.level) || 0));
+    var bar = $("levelBar");
+    bar.style.width = (lvl * 25) + "%";
+    bar.style.background = lvl >= 4 ? "#ff5d5d" : lvl === 3 ? "#ffb020" : "#37d67a";
+    $("caneAge").textContent = cane.state ? "Water sensor reading: " + (typeof s.water === "number" ? s.water : "-") : "";
+
+    // camera detections
+    var v = cane.vision, objsEl = $("objs");
+    objsEl.textContent = "";
+    var vAge = v && typeof v.t === "number" ? Math.round((now - v.t) / 1000) : null;
+    var list = asList(v && v.objects);
+    if (vAge === null || vAge > 20) {
+      var li0 = el("li"); li0.appendChild(el("span", "meta", "Phone camera is off or not sharing")); objsEl.appendChild(li0);
+    } else if (!list.length) {
+      var li1 = el("li"); li1.appendChild(el("span", "meta", "Nothing recognised right now")); objsEl.appendChild(li1);
+    } else {
+      list.forEach(function (o) {
+        var conf = Math.max(0, Math.min(100, Number(o.conf) || 0));
+        var li = el("li");
+        li.appendChild(el("span", "name", String(o.label) + " " + conf + "%"));
+        li.appendChild(el("span", "meta", String(o.pos) + " - " + String(o.size)));
+        var b = el("span", "bar"); var f = el("i"); f.style.width = conf + "%"; b.appendChild(f); li.appendChild(b);
+        objsEl.appendChild(li);
+      });
+    }
+    $("visAge").textContent = v ? "Updated " + ageText(v.t, now) + (v.fps ? " | phone speed " + Number(v.fps) + " frames per second" : "") : "";
+
+    // location
+    var loc = cane.loc, locText = $("locText"), map = $("map"), links = $("locLinks");
+    var lat = loc ? Number(loc.lat) : NaN, lng = loc ? Number(loc.lng) : NaN;
+    links.textContent = "";
+    if (loc && isFinite(lat) && isFinite(lng)) {
+      locText.textContent = lat.toFixed(5) + ", " + lng.toFixed(5) + " (accuracy " + (Number(loc.acc) || 0) + " m) - " + ageText(loc.t, now);
+      var key = lat.toFixed(4) + "," + lng.toFixed(4);
+      if (key !== mapKey) {
+        mapKey = key;
+        map.src = "https://www.openstreetmap.org/export/embed.html?bbox=" + (lng - 0.004) + "," + (lat - 0.0025) + "," + (lng + 0.004) + "," + (lat + 0.0025) + "&layer=mapnik&marker=" + lat + "," + lng;
+        map.hidden = false;
+      }
+      var a1 = el("a", "", "Open in OpenStreetMap"); a1.href = "https://www.openstreetmap.org/?mlat=" + lat + "&mlon=" + lng + "#map=17/" + lat + "/" + lng; a1.target = "_blank"; a1.rel = "noopener";
+      var a2 = el("a", "", "Open in Google Maps"); a2.href = "https://www.google.com/maps?q=" + lat + "," + lng; a2.target = "_blank"; a2.rel = "noopener";
+      links.appendChild(a1); links.appendChild(document.createTextNode("  |  ")); links.appendChild(a2);
+    } else {
+      locText.textContent = "Not shared";
+      map.hidden = true; mapKey = "";
+    }
+
+    // alerts log (newest first)
+    var evEl = $("events"); evEl.textContent = "";
+    var evs = asList(events).reverse().slice(0, 12);
+    if (!evs.length) {
+      var li2 = el("li"); li2.appendChild(el("span", "meta", "No alerts yet")); evEl.appendChild(li2);
+    }
+    evs.forEach(function (e) {
+      var li = el("li");
+      li.appendChild(el("span", "ev-time", typeof e.t === "number" ? new Date(e.t).toLocaleTimeString() : "-"));
+      li.appendChild(el("span", "name " + (e.type === "wet" ? "ev-wet" : "ev-close"), String(e.text)));
+      evEl.appendChild(li);
+    });
+  }
+
+  async function pollOnce() {
+    var db = dbEl.value, code = codeEl.value;
+    if (!normalizeDb(db) || !cleanCode(code)) return;
+    try {
+      var q = "orderBy=" + encodeURIComponent('"$key"') + "&limitToLast=15";
+      var rs = await Promise.all([
+        fetch(pathUrl(db, "cane", code, "", ""), { cache: "no-store" }),
+        fetch(pathUrl(db, "events", code, "", q), { cache: "no-store" })
+      ]);
+      if (!rs[0].ok) throw new Error("HTTP " + rs[0].status);
+      var cane = await rs[0].json();
+      var events = rs[1].ok ? await rs[1].json() : null;
+      errEl.textContent = "";
+      render(cane, events);
+    } catch (e) {
+      errEl.textContent = "Could not read the database (" + (e && e.message ? e.message : e) + "). Check the address, the code and the internet.";
+    }
+  }
+
+  function connect() {
+    try { localStorage.setItem("care_db", dbEl.value.trim()); localStorage.setItem("care_code", codeEl.value.trim()); } catch (e) {}
+    if (timer) clearInterval(timer);
+    if (!normalizeDb(dbEl.value) || !cleanCode(codeEl.value)) { errEl.textContent = "Enter the database address and the pairing code."; return; }
+    pollOnce();
+    timer = setInterval(pollOnce, 2000);
+    $("setupBox").open = false;
+  }
+
+  // settings: link (#db=...&code=...) first, then what was saved on this device
+  var hp = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+  try {
+    dbEl.value = hp.get("db") || localStorage.getItem("care_db") || "";
+    codeEl.value = hp.get("code") || localStorage.getItem("care_code") || "";
+  } catch (e) { dbEl.value = hp.get("db") || ""; codeEl.value = hp.get("code") || ""; }
+  $("connectBtn").addEventListener("click", connect);
+  if (normalizeDb(dbEl.value) && cleanCode(codeEl.value)) connect();
+})();
+</script>
+</body>
+</html>
