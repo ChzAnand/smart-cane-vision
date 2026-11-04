@@ -17,7 +17,8 @@
   .banner small { display: block; font-weight: 500; font-size: .9rem; margin-top: 2px; opacity: .9; }
   .online { background: #123d28; color: #9bf0c0; } .stale { background: #4a3a10; color: #ffd98a; }
   .offline { background: #4a1818; color: #ffb3b3; } .none { background: #26304f; color: var(--muted); }
-  .sev0 { background: #123d28; color: #9bf0c0; } .sev1 { background: #4a3a10; color: #ffd98a; } .sev2 { background: #5a1a1a; color: #ffc2c2; }
+  .sev0 { background: #123d28; color: #9bf0c0; } .sev1 { background: #4a3a10; color: #ffd98a; } .sev2 { background: #5a1a1a; color: #ffc2c2; } .sev3 { background: #b00020; color: #fff; font-weight: 800; animation: sosblink 1s infinite; }
+  @keyframes sosblink { 50% { background: #ff3b3b; } }
   .big { font-size: 2.4rem; font-weight: 800; line-height: 1.1; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
   .meter { height: 12px; background: #222b4a; border-radius: 8px; overflow: hidden; margin-top: 8px; }
@@ -28,7 +29,7 @@
   .bar { width: 80px; height: 10px; background: #222b4a; border-radius: 6px; overflow: hidden; flex: 0 0 80px; }
   .bar > i { display: block; height: 100%; background: var(--good); }
   .ev-time { color: var(--muted); font-size: .85rem; flex: 0 0 74px; }
-  .ev-wet { color: #ffc2c2; } .ev-close { color: #ffd98a; }
+  .ev-wet { color: #ffc2c2; } .ev-close { color: #ffd98a; } .ev-sos { color: #ff8a8a; font-weight: 800; }
   input[type=text] { width: 100%; font-size: 1rem; padding: 12px; border-radius: 10px; border: 1px solid #2a3558; background: #0b1020; color: var(--text); margin-top: 6px; }
   button { font-size: 1.05rem; padding: 13px 16px; border-radius: 12px; border: 0; background: var(--accent); color: #111; font-weight: 700; margin-top: 10px; width: 100%; cursor: pointer; }
   iframe { width: 100%; height: 240px; border: 0; border-radius: 12px; margin-top: 10px; }
@@ -60,7 +61,7 @@
   <div class="card">
     <div class="label">Cane sensors</div>
     <div class="grid">
-      <div><div class="label">Distance ahead</div><div id="dist" class="big">-</div></div>
+      <div><div class="label">Distance: top / bottom</div><div id="dist" class="big">-</div></div>
       <div><div class="label">Ground</div><div id="wet" class="big">-</div></div>
     </div>
     <div class="label" style="margin-top:12px">Alert level (0 quiet, 4 obstacle very close)</div>
@@ -180,6 +181,7 @@ function alertFrom(state) {
   if (!state) return { severity: 0, text: "No cane data yet" };
   var dist = typeof state.dist === "number" ? state.dist : null;
   var where = dist !== null ? " (" + Math.round(dist) + " cm)" : "";
+  if (Number(state.sos) === 1) return { severity: 3, text: "SOS - the user needs help!" };
   if (Number(state.wet) === 1) return { severity: 2, text: "Wet ground detected" };
   if (Number(state.level) >= 4) return { severity: 2, text: "Obstacle very close" + where };
   if (Number(state.level) === 3) return { severity: 1, text: "Obstacle close" + where };
@@ -234,12 +236,14 @@ if (typeof module !== "undefined") {
     var titles = { online: "Cane ONLINE", stale: "Cane connection slow", offline: "Cane OFFLINE", none: "No data from the cane yet" };
     setBanner($("conn"), st.kind, titles[st.kind], st.ageS === null ? "Waiting for the first reading." : "Last reading " + st.ageS + " s ago");
 
-    var al = (st.kind === "online" || st.kind === "stale") ? alertFrom(cane.state) : { severity: 0, text: st.kind === "none" ? "No cane data yet" : "Cane not reporting, so hazards cannot be shown" };
+    var al = (st.kind === "online" || st.kind === "stale" || (cane.state && Number(cane.state.sos) === 1)) ? alertFrom(cane.state) : { severity: 0, text: st.kind === "none" ? "No cane data yet" : "Cane not reporting, so hazards cannot be shown" };
     setBanner($("alert"), "sev" + al.severity, al.text);
     document.title = (al.severity === 2 ? "DANGER - " : al.severity === 1 ? "Caution - " : st.kind === "offline" ? "Offline - " : "") + "Smart Cane - Caretaker";
 
     var s = cane.state || {};
-    $("dist").textContent = typeof s.dist === "number" ? Math.round(s.dist) + " cm" : (cane.state ? "no echo" : "-");
+    $("dist").textContent = !cane.state ? "-" : (typeof s.top === "undefined" && typeof s.bottom === "undefined")
+      ? (typeof s.dist === "number" ? Math.round(s.dist) + " cm" : "no echo")
+      : (typeof s.top === "number" ? Math.round(s.top) + " cm" : "no echo") + " / " + (typeof s.bottom === "number" ? Math.round(s.bottom) + " cm" : "no echo");
     $("wet").textContent = cane.state ? (Number(s.wet) === 1 ? "WET" : "dry") : "-";
     var lvl = Math.max(0, Math.min(4, Number(s.level) || 0));
     var bar = $("levelBar");
@@ -297,7 +301,7 @@ if (typeof module !== "undefined") {
     evs.forEach(function (e) {
       var li = el("li");
       li.appendChild(el("span", "ev-time", typeof e.t === "number" ? new Date(e.t).toLocaleTimeString() : "-"));
-      li.appendChild(el("span", "name " + (e.type === "wet" ? "ev-wet" : "ev-close"), String(e.text)));
+      li.appendChild(el("span", "name " + (e.type === "wet" ? "ev-wet" : e.type === "sos" ? "ev-sos" : "ev-close"), String(e.text)));
       evEl.appendChild(li);
     });
   }
